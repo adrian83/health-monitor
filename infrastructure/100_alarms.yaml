@@ -1,0 +1,30 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: SNS Topic for alerting via email
+
+Parameters:
+  AlertEmail:
+    Type: String
+    Description: Address that will receive SNS alerts
+
+Resources:
+  AlertSnsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: Alert Notifications
+      TopicName: alert-notifications-topic
+
+  AlertSnsSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      Protocol: email
+      Endpoint: !Ref AlertEmail
+      TopicArn: !Ref AlertSnsTopic
+
+  ExportTopicArnToParameterStore:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /alerting/sns/topicArn
+      Type: String
+      Value: !Ref AlertSnsTopic
+      Description: ARN of SNS Topic for alerts
+      Tier: Standard
