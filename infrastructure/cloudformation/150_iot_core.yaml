@@ -1,0 +1,194 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description:  AWS IoT
+
+Parameters:
+
+  CertificateSigningRequest:
+    Type: String
+    Description: Certificate Signing Request (CSR) for the IoT device.
+    Default: |
+      -----BEGIN CERTIFICATE REQUEST-----
+      MIICzjCCAbYCAQAwgYgxCzAJBgNVBAYTAlBMMRUwEwYDVQQIDAxEb2xub3NsYXNr
+      aWUxEDAOBgNVBAcMB1dyb2NsYXcxDTALBgNVBAoMBE5vbmUxDTALBgNVBAsMBE5v
+      bmUxDTALBgNVBAMMBE5vbmUxIzAhBgkqhkiG9w0BCQEWFG5vbmVAbm90ZXhpc3Rp
+      bmcuY29tMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtYbGzNe5uPgs
+      ckJT/JHE2bgEVTHWs2VhJJKNRSvLirUtHlM0w692jTYfeSv0bJkoTMia2T8E8W2K
+      gxvszqZwNOFyEBpWeHidvFm/ojlCrHqEjNf7iV3afKko0aHYKJnhbzN4w+BiJAch
+      2GFEtDlbBlYe8EQkvs9VRg1GAXczMen1B1zcwAvcRhIeUDMmXc5EdT3z37UYqV2f
+      vFu+4sn0Vpp7ogurWzLHsym5+WnngRWVPI7asKEM+oIz9/Q/1Dbuwp8Vr4H4yzNA
+      cAkQ96823iMhWSMZx3fcKqsr7ZJxAlFjQPOUIzwXGW87L/2ZiJUdYty+CqbSrJ8m
+      c52j55i18QIDAQABoAAwDQYJKoZIhvcNAQELBQADggEBAJ3zQxk0ujuxoN6PPKVM
+      MckxS17sJhE6hbadXD8n53YMBbZQ4vNBbTXl3/ndIZ039mongYAwY5/1/jrN+k2I
+      YqvGRC95+WWB2RJeeLbtq05ON85ClzcWTi6cvtrnxnmO1uYaLVVX7GPVqS1+f+rZ
+      Jcxf5x3tcBZa4rb+eusB4xUP3TE8MwYYxfrud8BcMjiXkMrT7EVT8hp42EEfafNM
+      p+E7jVLMG9R7pFiDLW9zOp2MmpbnKFznp18GtbwcEdcO8/m4B2UUWUSSe4SpWJZA
+      IJaE7FjeC2lrPF9Qz/k0R499YSJWjE2hZl4Vz3CMAYc09ggKADhn/ZjjvaMbm6lP
+      ZgI=
+      -----END CERTIFICATE REQUEST-----
+
+
+Resources:
+
+  CertificateSigningRequestSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: healt-monitor-iot-certificate-signing-request
+      Description: IoT device certificate
+      SecretString: !Ref CertificateSigningRequest
+
+  IoTThing:
+    Type: AWS::IoT::Thing
+    Properties:
+      ThingName: IotSimulatorDevice
+
+  IoTPolicy:
+    Type: AWS::IoT::Policy
+    Properties:
+      PolicyName: IotSimulatorPolicy
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - iot:Connect
+              - iot:Publish
+              - iot:Subscribe
+              - iot:Receive
+            Resource: "*"
+
+  IoTCertificate:
+    Type: AWS::IoT::Certificate
+    Properties:
+      Status: ACTIVE
+      CertificateMode: DEFAULT
+      CertificateSigningRequest: !Ref CertificateSigningRequest
+
+  ThingPrincipalAttachment:
+    Type: AWS::IoT::ThingPrincipalAttachment
+    Properties:
+      ThingName: !Ref IoTThing
+      Principal: !GetAtt IoTCertificate.Arn
+
+  PolicyPrincipalAttachment:
+    Type: AWS::IoT::PolicyPrincipalAttachment
+    Properties:
+      PolicyName: !Ref IoTPolicy
+      Principal: !GetAtt IoTCertificate.Arn
+
+
+
+  IotPrivateKeySecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: healt-monitor-iot-private-key
+
+  IotCertificateSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: healt-monitor-iot-certificate
+
+  IotRootCASecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: healt-monitor-iot-root-ca
+
+  IotLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: IotSecretsWriteAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - iot:CreateKeysAndCertificate
+                  - iot:DescribeEndpoint
+                  - secretsmanager:PutSecretValue
+                Resource: "*"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  IotCertLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: IotCertGenerator
+      Runtime: python3.11
+      Handler: index.handler
+      Role: !GetAtt IotLambdaRole.Arn
+      Timeout: 60
+      Code:
+        ZipFile: |
+          import boto3
+          import cfnresponse
+          import json
+
+          def handler(event, context):
+              iot = boto3.client('iot')
+              secrets = boto3.client('secretsmanager')
+
+              try:
+                  if event['RequestType'] == 'Create':
+                      cert = iot.create_keys_and_certificate(setAsActive=True)
+                      certPem = cert['certificatePem']
+                      keyPem = cert['keyPair']['PrivateKey']
+                      caPem = boto3.client('iot').describe_endpoint(endpointType='iot:Data-ATS')['endpointAddress']
+
+                      secrets.put_secret_value(
+                          SecretId=event['ResourceProperties']['PrivateKeySecretId'],
+                          SecretString=keyPem
+                      )
+                      secrets.put_secret_value(
+                          SecretId=event['ResourceProperties']['CertificateSecretId'],
+                          SecretString=certPem
+                      )
+                      # For demonstration purposes; normally use real CA contents
+                      secrets.put_secret_value(
+                          SecretId=event['ResourceProperties']['RootCASecretId'],
+                          SecretString="USE_REAL_CA_HERE_OR_DOWNLOAD"
+                      )
+
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {}, cert['certificateId'])
+
+                  else:
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {}, 'noop')
+
+              except Exception as e:
+                  print("Exception:", str(e))
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {"Message": str(e)}, 'Error')
+
+  IotCustomResource:
+    Type: Custom::IotCertificateGenerator
+    Properties:
+      ServiceToken: !GetAtt IotCertLambda.Arn
+      PrivateKeySecretId: !Ref IotPrivateKeySecret
+      CertificateSecretId: !Ref IotCertificateSecret
+      RootCASecretId: !Ref IotRootCASecret
+
+
+
+
+
+# Outputs:
+#   CertificateId:
+#     Description: Certificate ID
+#     Value: !Ref IoTCertificate
+
+#   CertificatePem:
+#     Description: Certificate in PEM format
+#     Value: !GetAtt IoTCertificate.CertificatePem
+
+#   PrivateKey:
+#     Description: Private key for the certificate
+#     Value: !GetAtt IoTCertificate.PrivateKey
+
+#   IotEndpoint:
+#     Description: AWS IoT Data ATS endpoint
+#     Value: !Sub "{{resolve:ssm:/aws/service/iot/data-ats}}"

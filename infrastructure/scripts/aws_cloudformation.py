@@ -32,6 +32,55 @@ def create_stack(name: str, template_path: str, params: dict[str, str]=None, tag
     print(f"Stack {name} created successfully.")
 
 
+
+def update_stack(name: str, template_path: str, params: dict[str, str]=None, tags: dict[str, str]=None):
+    parameters = [{'ParameterKey': key, 'ParameterValue': value} for key, value in params.items()] if params else []
+    tags = [{'Key': key, 'Value': value} for key, value in tags.items()] if tags else []
+
+    try:
+        print(f"Attempting to update stack '{name}'...")
+
+        with open(template_path, 'r') as f:
+            template_body = f.read()
+
+        response = cf.update_stack(
+            StackName=name,
+            TemplateBody=template_body,
+            Parameters=parameters,
+            Tags=tags,
+            Capabilities=['CAPABILITY_NAMED_IAM', 'CAPABILITY_AUTO_EXPAND']
+        )
+
+        print(f"Update started. Stack ID: {response['StackId']}")
+
+        waiter = cf.get_waiter('stack_update_complete')
+        waiter.wait(StackName=name)
+        print(f"Stack {name} updated successfully.")
+
+    except botocore.exceptions.ClientError as e:
+        message = str(e)
+        if "No updates are to be performed" in message:
+            print("ℹ️  No updates to perform. Stack is up to date.")
+        else:
+            raise e
+
+
+
+def create_or_update_stack(name: str, template_path: str, params: dict[str, str]=None, tags: dict[str, str]=None):
+    try:
+        cf.describe_stacks(StackName=name)
+
+        update_stack(name, template_path, params, tags)
+
+    except botocore.exceptions.ClientError as e:
+        if "does not exist" in str(e):
+            
+            create_stack(name, template_path, params, tags)
+        else:
+            raise e
+
+
+
 def delete_stack(stack_name):
     cf.delete_stack(StackName=stack_name)
 
@@ -41,12 +90,13 @@ def delete_stack(stack_name):
     print(f"Stack {stack_name} deleted successfully.")
 
 
+
 def delete_stack_if_exists(stack_name):
     try:
         cf.describe_stacks(StackName=stack_name)
         delete_stack(stack_name)
     except botocore.exceptions.ClientError as error:
         if 'does not exist' in str(error):
-            print(f"Stack {stack_name} nie istnieje, nic nie robię.")
+            print(f"Stack {stack_name} does not exist. Skipping.")
         else:
             raise error

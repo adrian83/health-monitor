@@ -13,3 +13,13 @@
 ### Destroing infrastructure
 
 1. `python3 destroy.py`
+
+
+
+
+### MISC 
+#### Generating CSR
+```
+openssl genpkey -algorithm RSA -out private.pem -pkeyopt rsa_keygen_bits:2048
+openssl req -new -key private.pem -out csr.pem -sha256
+```

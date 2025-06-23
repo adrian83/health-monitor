@@ -1,0 +1,36 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: ECR repositories
+
+Parameters:
+  Test:
+    Type: String
+    Description: test
+    Default: test
+
+Resources:
+  MockIotEventsECRRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: 'health-monitor-mock-iot-events'
+      EmptyOnDelete: true
+      ImageTagMutability: MUTABLE
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      LifecyclePolicy:
+        LifecyclePolicyText: !Sub |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Keep only 3 newest images",
+                "selection": {
+                  "tagStatus": "any",
+                  "countType": "imageCountMoreThan",
+                  "countNumber": 3
+                },
+                "action": {
+                  "type": "expire"
+                }
+              }
+            ]
+          }
