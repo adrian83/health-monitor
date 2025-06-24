@@ -26,7 +26,6 @@ hs_err_pid*
 replay_pid*
 
 
-*/target/*
 
 
 # PYTHON
@@ -34,3 +33,6 @@ replay_pid*
 venv
 
 *.pyc
+
+# Maven
+**/target/
